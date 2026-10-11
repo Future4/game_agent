@@ -1,0 +1,11 @@
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+pywin32>=306
+paddleocr>=2.8.0
+pytesseract>=0.3.10
+ultralytics>=8.0.0
+pyyaml>=6.0
+# Windows 内置 OCR(winsdk)：本机 PaddleOCR 因 torch c10.dll、Tesseract 因 numpy ABI
+# 初始化失败时的首选 OCR 引擎（提供中文识别 + 包围盒）
+winsdk>=1.0.0b10

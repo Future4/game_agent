@@ -1,0 +1,37 @@
+window:
+  title_keywords:
+    - "梦幻西游"
+  class_names:
+    - "UnityWndClass"
+  blacklist_title_keywords:
+    - "Visual Studio"
+    - "PyCharm"
+    - "VS Code"
+    - "cmd"
+    - "powershell"
+  blacklist_class_names:
+    - "Qt5QWindowIcon"
+    - "Qt5QWindow"
+    - "Chrome_WidgetWin_1"
+    - "MozillaWindowClass"
+
+vision:
+  template_dir: "templates"
+  use_paddle_ocr: true
+  ocr_lang: "ch"
+  yolo_model_path: null
+  template_match_threshold: 0.8
+  ocr_confidence_threshold: 0.6
+  yolo_confidence_threshold: 0.5
+
+state_machine:
+  state_timeout: 30.0
+  max_no_match_count: 10
+
+agent:
+  update_interval: 0.5
+  window_check_interval: 10
+
+logging:
+  level: "INFO"
+  file_path: "game_agent.log"

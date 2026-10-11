@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 日志
+*.log
+
+# 调试 / 诊断产物
+debug/
+_diag_ocr.txt
+
+# 根目录下的诊断截图与临时截图（templates/ 下的模板资源不受影响）
+/*.png
+/*.jpg
+/*.jpeg
