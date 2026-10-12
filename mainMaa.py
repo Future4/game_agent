@@ -25,11 +25,29 @@ from agent.orchestrator import AgentOrchestrator
 from config.loader import ConfigLoader
 from domain.tasks import TaskContext
 from tasks.baotu_maa import BaotuMaaTask
+from tasks.chuangjianduiwu_maa import ChuangjianDuiwuMaaTask
+from tasks.fuben69_maa import Fuben69MaaTask
+from tasks.fuben115_maa import Fuben115MaaTask
+from tasks.mijing_maa import MijingMaaTask
+from tasks.shimen_maa import ShimenMaaTask
+from tasks.wabaotu_maa import WabaotuMaaTask
+from tasks.yunbiao_maa import YunbiaoMaaTask
+from tasks.zhenglibaibao_maa import ZhengliBaibaoMaaTask
+from tasks.zhuogui_maa import ZhuoguiMaaTask
 
 # 已从 Maa_MHXY 移植过来的任务登记表。
 # id: (显示名, 任务类)
 MAA_TASKS = {
     "baotu": ("宝图任务(获得)", BaotuMaaTask),
+    "wabaotu": ("挖宝图(清理)", WabaotuMaaTask),
+    "yunbiao": ("运镖普通", YunbiaoMaaTask),
+    "shimen": ("师门任务", ShimenMaaTask),
+    "zhuogui": ("捉鬼任务", ZhuoguiMaaTask),
+    "fuben69": ("副本320(69)", Fuben69MaaTask),
+    "fuben115": ("副本520(89/115)", Fuben115MaaTask),
+    "mijing": ("秘境降妖", MijingMaaTask),
+    "zhenglibaibao": ("整理背包", ZhengliBaibaoMaaTask),
+    "chuangjianduiwu": ("创建队伍", ChuangjianDuiwuMaaTask),
 }
 
 
