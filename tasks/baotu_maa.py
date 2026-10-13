@@ -92,6 +92,7 @@ class BaotuMaaTask(AutomationTask):
     TH_TREASURE_COMPLETED = 0.90     # Maa「活动-宝图任务-已完成」threshold 0.9
     TH_TREASURE_OBTAINED = 0.70
     TH_DIALOGUE = 0.86   # baotu_dialogue 在主界面会误命中 0.83，抬高避免误点
+    TH_JOIN_BTN = 0.80   # canjia_btn 行锚点窗口内实测 0.996
     TH_POPUP_CLOSE = 0.88
     TH_JIUYOU = 0.80
     TH_AUTOPATH = 0.90               # Maa「宝图完成判断」自动寻路 threshold 0.9
@@ -127,6 +128,8 @@ class BaotuMaaTask(AutomationTask):
     T_TREASURE_OBTAINED = "treasure_obtained"
     # Maa 用 OCR 认"听听无妨"；本机用实测模板
     T_DIALOGUE = "baotu_dialogue"
+    # 官网客户端"参加"按钮（裁剪自本机活动界面截图；OCR 读不出宝图行的"参加"）
+    T_JOIN_BTN = ("canjia_btn",)
     # Maa「战斗平衡弹窗-点击关闭」
     T_POPUP_CLOSE = ("zonghe/zhandoupingheng_guanbi1",)
     # Maa「师门完成-九幽遮挡」
@@ -154,7 +157,7 @@ class BaotuMaaTask(AutomationTask):
     # 任务栏文本区：官网客户端任务栏在右侧，实测"宝图任务"框 x610..726 y133..149，
     # 比 Maa 模拟器的 roi 更靠左，这里放大以免漏检
     ROI_TASKBAR_TEXT = (0.68, 0.10, 0.32, 0.62)
-    ROI_ACTIVITY_PANEL = (0.20, 0.00, 0.62, 0.14)   # Maa [350,23,600,62] 放大
+    ROI_ACTIVITY_PANEL = (0.15, 0.10, 0.70, 0.30)   # 官网客户端"活 动"标题栏在 16%~21% 高度（实测 0.981），旧 ROI(0~14%) 完全罩不住
     ROI_ACTIVITY_BUTTON = (0.00, 0.00, 0.45, 0.30)  # 左上角活动入口
     ROI_DAILY_LEFT = (0.00, 0.00, 0.35, 0.55)       # 活动面板左侧导航
     ROI_LIST = (0.12, 0.08, 0.85, 0.70)             # 活动列表主区域
@@ -489,12 +492,31 @@ class BaotuMaaTask(AutomationTask):
         x, y, rw, rh = region
         for item in lines:
             text = (item.get("text") or "").strip()
+            text = text.replace(" ", "").replace("\u3000", "")
             if text not in labels:
                 continue
             cx, cy = item["center"]
             if x <= cx <= x + rw and y <= cy <= y + rh:
                 return (int(cx), int(cy))
         return None
+
+    def _find_label_nearest(self, lines, labels, region: Region,
+                            anchor: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """同 _find_label_in，但区域里命中多行时返回离 anchor 最近的中心。"""
+        x, y, rw, rh = region
+        best = None
+        for item in lines:
+            text = (item.get("text") or "").strip()
+            text = text.replace(" ", "").replace("\u3000", "")
+            if text not in labels:
+                continue
+            cx, cy = item["center"]
+            if not (x <= cx <= x + rw and y <= cy <= y + rh):
+                continue
+            d = (cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2
+            if best is None or d < best[0]:
+                best = (d, int(cx), int(cy))
+        return (best[1], best[2]) if best else None
 
     @staticmethod
     def _colormatch(img, region: Region, lower, upper, count: int) -> bool:
@@ -697,17 +719,25 @@ class BaotuMaaTask(AutomationTask):
             m = self._match_any(agent, self.T_TREASURE_START_LOCAL, roi, self.TH_TREASURE_START)
         if not m:
             return False
-        # Maa「活动-宝图任务-开始-点击参加」: OCR"参加"(roi 同行区域)
-        pos = self._find_label_in(self._ocr_lines(agent), ("参加",), roi)
-        if pos:
-            logger.info("窗口=%s 点击宝图任务参加(OCR) %s", agent.hwnd, pos)
-            agent.click(pos[0], pos[1])
+        # Maa「活动-宝图任务-开始-点击参加」：Windows OCR 漏检率高（实测宝图行的"参加"读不出，
+        # 只能读到其他行的），用本机 canjia_btn 模板在行锚点右侧窗口内匹配，最稳；
+        # OCR 最近邻与行偏移仅作兜底
+        btn_roi = (int(m[0]) - 10, int(m[1]) - 45, 150, 90)
+        b = self._match_any(agent, self.T_JOIN_BTN, btn_roi, self.TH_JOIN_BTN)
+        if b:
+            logger.info("窗口=%s 点击宝图任务参加(模板) %s", agent.hwnd, b[:2])
+            agent.click(b[0], b[1])
         else:
-            scale = m[3] if len(m) > 3 else 1.0
-            target = (int(m[0] + self.JOIN_BTN_OFFSET_X * scale), int(m[1]))
-            logger.info("窗口=%s 点击宝图任务参加(行偏移) %s (行中心=%s scale=%.2f)",
-                        agent.hwnd, target, m[:2], scale)
-            agent.click(target[0], target[1])
+            pos = self._find_label_nearest(self._ocr_lines(agent), ("参加",), roi, (m[0], m[1]))
+            if pos:
+                logger.info("窗口=%s 点击宝图任务参加(OCR) %s", agent.hwnd, pos)
+                agent.click(pos[0], pos[1])
+            else:
+                scale = m[3] if len(m) > 3 else 1.0
+                target = (int(m[0] + self.JOIN_BTN_OFFSET_X * scale), int(m[1]))
+                logger.info("窗口=%s 点击宝图任务参加(行偏移) %s (行中心=%s scale=%.2f)",
+                            agent.hwnd, target, m[:2], scale)
+                agent.click(target[0], target[1])
         time.sleep(1.2)
         self._ocr_cache = None
         return True

@@ -45,7 +45,9 @@ wabaotu -> ClickKey[57,33](Alt+E 打开背包)
 官网 PC 客户端(Unity) 与 Maa 的模拟器(1280x720) 不同:
   1. 布局非等比, roi 由 Maa 像素坐标换算为窗口比例并适当放大, 模板匹配用多尺度。
   2. ClickKey[57,33] = Alt+E 开背包, 用 win32 keybd_event 实现; 失败回退点包裹图标。
-  3. OCR(整理/使用/包裹/三界热点) 走整图识别+ROI 中心过滤(带缓存), 与宝图任务一致。
+  3. 整理/使用按钮：Windows OCR 读不出官网客户端的按钮文字（白字金底+字间距大），
+     "整理"用本机裁剪模板 beibao/zhengli_btn，"使用"用 run_dig_task.py 验证过的
+     use_dialog1/2 + use_btn1/2 模板；OCR 仅作兜底（整图识别+ROI 中心过滤，带缓存）。
   4. 战斗检测沿用本机已验证的「顶部圆形一致性(HoughCircles)」方案。
 
 滑动方向约定(与手指方向一致, 内容跟随手指):
@@ -95,12 +97,15 @@ class WabaotuMaaTask(AutomationTask):
     TH_BAG_ICON = 0.90           # Maa 包裹图标 threshold 0.9
     TH_BAG_PANEL = 0.75
     TH_CANGBAOTU = 0.75
-    TH_BAG_BOTTOM = 0.85         # Maa: 挖宝完成 0.8 / 整理完成 0.9，取中间值
+    TH_BAG_BOTTOM = 0.88         # Maa: 挖宝完成 0.8 / 整理完成 0.9；0.88 避开礼包按钮(实测 0.81)误报
     TH_POPUP_CLOSE = 0.88
     TH_AUTOPATH = 0.90
     TH_AMAZING = 0.80
     TH_AMAZING_CLOSE = 0.80
     TH_EXIT_CONFIRM = 0.80
+    TH_ZHENGLI_BTN = 0.85        # 整理按钮模板（裁剪自本机截图，实测 0.99）
+    TH_USE_DIALOG = 0.65         # 使用对话框（use_dialog1/2）
+    TH_USE_BTN = 0.70            # 使用按钮（use_btn1/2）
 
     # ---------------- 模板名（templates/ 目录，不带 .png）----------------
     # 命名与 Maa_MHXY-main/assets/resource/base/image 完全一致（保留子目录/相对路径）。
@@ -127,15 +132,24 @@ class WabaotuMaaTask(AutomationTask):
     T_AMAZING_CLOSE = ("zonghe/amazing_discount_close",)
     # Maa「close_exit_confirm」
     T_EXIT_CONFIRM = ("zonghe/exit_confirm",)
+    # 官网客户端补充模板（Windows OCR 读不出"整理/使用"按钮文字，改用模板）
+    # 整理按钮（裁剪自本机背包截图）
+    T_ZHENGLI_BTN = ("beibao/zhengli_btn",)
+    # 背包使用确认对话框（点击藏宝图后弹出：丢弃/使用），沿用 run_dig_task.py 已验证模板
+    T_USE_DIALOG1 = ("use_dialog1",)
+    T_USE_BTN1 = ("use_btn1",)
+    # 到达地点后的使用对话框（"使 用" + 关闭X）
+    T_USE_DIALOG2 = ("use_dialog2",)
+    T_USE_BTN2 = ("use_btn2",)
 
     # ---------------- 区域比例（由 Maa 1280x720 像素 roi 换算并适当放大）----------------
     ROI_MAIN_INDICATOR = (0.86, 0.72, 0.14, 0.28)   # 右下角 +/称号/包裹
     ROI_CHA = (0.82, 0.42, 0.18, 0.20)              # Maa [1135,369,50,46] 放大
     ROI_BAG_ICON = (0.86, 0.66, 0.14, 0.32)         # Maa [1185,529,95,110] 放大
-    ROI_BAG_PANEL = (0.18, 0.00, 0.64, 0.14)        # Maa [335,5,577,68] 放大
+    ROI_BAG_PANEL = (0.15, 0.00, 0.70, 0.25)        # Maa [335,5,577,68] 放大；官网客户端标题栏偏低(底部约16%)，需覆盖到 0.25
     ROI_BAG_GRID = (0.42, 0.14, 0.55, 0.78)         # Maa [632,140,473,484] 放大
     ROI_BAG_BOTTOM = (0.62, 0.68, 0.30, 0.24)       # Maa [905,543,187,94] 放大
-    ROI_ZHENGLI = (0.60, 0.78, 0.38, 0.20)          # Maa OCR"整理" [879,618,234,67] 放大
+    ROI_ZHENGLI = (0.55, 0.68, 0.43, 0.30)          # 官网客户端"整 理"按钮中心约在 76% 高度，旧 ROI(0.78 起)罩不住
     ROI_USE_BAG = (0.24, 0.48, 0.32, 0.24)          # Maa OCR"使用" [425,418,159,63] 放大
     ROI_USE_MAIN = (0.66, 0.62, 0.34, 0.28)         # Maa OCR"使用" [1013,536,157,73] 放大
     ROI_SANJIE = (0.28, 0.86, 0.44, 0.14)           # Maa [472,666,332,38] 放大
@@ -439,7 +453,9 @@ class WabaotuMaaTask(AutomationTask):
             return False
         h, w = img.shape[:2]
         roi = self._fraction_region(w, h, self.ROI_ZHENGLI)
-        pos = self._find_label_in(self._ocr_lines(agent), ("整理",), roi)
+        # 模板优先（Windows OCR 读不出"整 理"按钮文字），OCR 兜底
+        m = self._match_any(agent, self.T_ZHENGLI_BTN, roi, self.TH_ZHENGLI_BTN)
+        pos = (m[0], m[1]) if m else self._find_label_in(self._ocr_lines(agent), ("整理",), roi)
         if not pos:
             logger.info("窗口=%s 未找到\"整理\"按钮，跳过", agent.hwnd)
             return False
@@ -454,7 +470,8 @@ class WabaotuMaaTask(AutomationTask):
 
         对应 Maa 的 next 列表: 点击藏宝图 | 整理完成/挖宝完成 | [JumpBack]背包向上滑动10次
         """
-        for swipe_count in range(self.bag_swipe_max + 1):
+        swipes = 0
+        while True:
             self._check_stop(agent)
             img = self._image(agent)
             if img is None:
@@ -466,27 +483,53 @@ class WabaotuMaaTask(AutomationTask):
                                 self._fraction_region(w, h, self.ROI_BAG_GRID),
                                 self.TH_CANGBAOTU)
             if m:
-                logger.info("窗口=%s 点击藏宝图 %s", agent.hwnd, m[:2])
-                agent.click(m[0], m[1])
-                time.sleep(0.8)
-                self._ocr_cache = None
-                return "found"
+                pos = self._confirm_stable(agent, m)
+                if pos:
+                    logger.info("窗口=%s 点击藏宝图 %s", agent.hwnd, pos[:2])
+                    agent.click(pos[0], pos[1])
+                    time.sleep(0.8)
+                    self._ocr_cache = None
+                    return "found"
+                # 截图偶发瞬移/滚动未稳定：本轮不翻页，稍后重查
+                logger.info("窗口=%s 藏宝图位置不稳定，等待画面稳定后重查", agent.hwnd)
+                if self._sleep(0.6):
+                    raise _Aborted()
+                continue
             # 整理完成/挖宝完成：背包空格或已到底
             if self._match_any(agent, self.T_BAG_BOTTOM,
                                self._fraction_region(w, h, self.ROI_BAG_BOTTOM),
                                self.TH_BAG_BOTTOM):
                 return "done"
-            if swipe_count < self.bag_swipe_max:
-                logger.info("窗口=%s 背包向下翻页(%d/%d)",
-                            agent.hwnd, swipe_count + 1, self.bag_swipe_max)
-                self._swipe_vertical(agent, self.SWIPE_BAG_X,
-                                     self.SWIPE_DOWN_FROM, self.SWIPE_DOWN_TO)
-                self._ocr_cache = None
-                time.sleep(0.5)
-        # 翻页 10 次仍没找到也没见到底部标记：按 Maa 语义视为没有，结束
-        logger.warning("窗口=%s 背包翻页 %d 次仍未找到藏宝图，按完成处理",
-                       agent.hwnd, self.bag_swipe_max)
-        return "done"
+            if swipes >= self.bag_swipe_max:
+                # 翻页 10 次仍没找到也没见到底部标记：按 Maa 语义视为没有，结束
+                logger.warning("窗口=%s 背包翻页 %d 次仍未找到藏宝图，按完成处理",
+                               agent.hwnd, self.bag_swipe_max)
+                return "done"
+            swipes += 1
+            logger.info("窗口=%s 背包向下翻页(%d/%d)",
+                        agent.hwnd, swipes, self.bag_swipe_max)
+            self._swipe_vertical(agent, self.SWIPE_BAG_X,
+                                 self.SWIPE_DOWN_FROM, self.SWIPE_DOWN_TO)
+            self._ocr_cache = None
+            time.sleep(0.5)
+
+    def _confirm_stable(self, agent, first, tries: int = 3,
+                        tolerance: float = 25.0) -> Optional[Tuple[int, int, float]]:
+        """点击前复验：连续两次匹配位置一致才返回，避免截图瞬移导致点空。"""
+        prev = first
+        for _ in range(tries):
+            time.sleep(0.2)
+            img = self._image(agent)
+            if img is None:
+                return None
+            h, w = img.shape[:2]
+            m = self._match_any(agent, self.T_CANGBAOTU,
+                                self._fraction_region(w, h, self.ROI_BAG_GRID),
+                                self.TH_CANGBAOTU)
+            if m and abs(m[0] - prev[0]) <= tolerance and abs(m[1] - prev[1]) <= tolerance:
+                return m
+            prev = m
+        return None
 
     # ==================================================================
     # 节点5: 藏宝图-背包使用 + 挖掘等待（Maa 的 JumpBack 循环）
@@ -536,7 +579,52 @@ class WabaotuMaaTask(AutomationTask):
                     idle_rounds = 0
                     continue
 
-            # [JumpBack]藏宝图-主界面使用
+            # [JumpBack]藏宝图-背包使用（背包确认对话框 use_dialog1/use_btn1）
+            # 官网客户端按钮文字 OCR 读不出，改用 run_dig_task.py 验证过的模板
+            state = self._use_dialog_state(agent, self.T_USE_DIALOG1, self.T_USE_BTN1)
+            if state is not None:
+                if isinstance(state, tuple):
+                    if time.monotonic() - self._last_use_click >= self.use_rate_limit:
+                        logger.info("窗口=%s 点击背包对话框\"使用\" %s", agent.hwnd, state)
+                        agent.click(state[0], state[1])
+                        self._last_use_click = time.monotonic()
+                        used = True
+                        time.sleep(1.0)
+                        self._ocr_cache = None
+                        idle_rounds = 0
+                        continue
+                    # Maa rate_limit 2000：限速期内不点击也不计空闲
+                    if self._sleep(self.poll_interval):
+                        raise _Aborted()
+                    continue
+                # 对话框在但按钮未匹配上：计入空闲，防止死等
+                idle_rounds += 1
+                if idle_rounds >= idle_rounds_max:
+                    logger.warning("窗口=%s 使用对话框按钮持续未匹配，跳过这张藏宝图", agent.hwnd)
+                    return used
+                if self._sleep(self.poll_interval):
+                    raise _Aborted()
+                continue
+            # [JumpBack]藏宝图-主界面使用（到达地点后的对话框 use_dialog2/use_btn2）
+            state = self._use_dialog_state(agent, self.T_USE_DIALOG2, self.T_USE_BTN2)
+            if state is not None:
+                if isinstance(state, tuple):
+                    logger.info("窗口=%s 点击地点对话框\"使用\" %s", agent.hwnd, state)
+                    agent.click(state[0], state[1])
+                    used = True
+                    time.sleep(1.0)
+                    self._ocr_cache = None
+                    idle_rounds = 0
+                    continue
+                idle_rounds += 1
+                if idle_rounds >= idle_rounds_max:
+                    logger.warning("窗口=%s 地点对话框按钮持续未匹配，跳过这张藏宝图", agent.hwnd)
+                    return used
+                if self._sleep(self.poll_interval):
+                    raise _Aborted()
+                continue
+
+            # [JumpBack]藏宝图-主界面使用（OCR 兜底）
             pos = self._ocr_use_in(agent, self.ROI_USE_MAIN)
             if pos:
                 logger.info("窗口=%s 点击主界面\"使用\" %s", agent.hwnd, pos)
@@ -585,6 +673,16 @@ class WabaotuMaaTask(AutomationTask):
         roi = self._fraction_region(w, h, frac)
         return self._find_label_in(self._ocr_lines(agent), ("使用",), roi)
 
+    def _use_dialog_state(self, agent, dialog_tpls, btn_tpls):
+        """检测使用对话框：无 -> None；在但按钮未匹配 -> "wait"；按钮位置 -> (x, y)。"""
+        img = self._image(agent)
+        if img is None:
+            return None
+        if not self._match_any(agent, dialog_tpls, None, self.TH_USE_DIALOG):
+            return None
+        m = self._match_any(agent, btn_tpls, None, self.TH_USE_BTN)
+        return (m[0], m[1]) if m else "wait"
+
     def _close_sanjie(self, agent) -> bool:
         """Maa「关闭三界热点」：OCR 找"点击...空白处关闭界面"并点击。"""
         img = self._image(agent)
@@ -594,6 +692,7 @@ class WabaotuMaaTask(AutomationTask):
         x, y, rw, rh = self._fraction_region(w, h, self.ROI_SANJIE)
         for item in self._ocr_lines(agent):
             text = (item.get("text") or "").strip()
+            text = text.replace(" ", "").replace("\u3000", "")
             if "空白处关闭界面" not in text:
                 continue
             cx, cy = item["center"]
@@ -705,10 +804,14 @@ class WabaotuMaaTask(AutomationTask):
         return results
 
     def _find_label_in(self, lines, labels, region: Region) -> Optional[Tuple[int, int]]:
-        """在整图 OCR 结果里、于指定区域内找**精确等于** labels 之一的文字，返回中心。"""
+        """在整图 OCR 结果里、于指定区域内找**精确等于** labels 之一的文字，返回中心。
+
+        比较前去掉文字内部的空格/全角空格（如"使 用"），避免 OCR 分词差异漏检。
+        """
         x, y, rw, rh = region
         for item in lines:
             text = (item.get("text") or "").strip()
+            text = text.replace(" ", "").replace("\u3000", "")
             if text not in labels:
                 continue
             cx, cy = item["center"]

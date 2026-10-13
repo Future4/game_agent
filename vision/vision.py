@@ -201,7 +201,7 @@ class TemplateMatcher:
 
     def match_multiscale(self, source_img: np.ndarray, template_name: str,
                          threshold: float = 0.7,
-                         scales: Tuple[float, ...] = (0.50, 0.60, 0.75, 0.85, 1.0, 1.15, 1.30, 1.50, 1.75, 2.0)) -> Optional[Tuple[int, int, float, float]]:
+                         scales: Tuple[float, ...] = (0.50, 0.60, 0.65, 0.70, 0.75, 0.85, 1.0, 1.15, 1.30, 1.50, 1.75, 2.0)) -> Optional[Tuple[int, int, float, float]]:
         """Match a template when source and template have different DPI scales."""
         if template_name not in self.templates:
             logger.error("模板不存在: %s", template_name)
